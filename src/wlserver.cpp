@@ -600,8 +600,21 @@ static void handle_wl_surface_commit( struct wl_listener *l, void *data )
 	xwayland_surface_commit(surf->wlr);
 }
 
+static void wlserver_xdg_toplevel_info_finish( struct wlserver_xdg_surface_info *info )
+{
+	if ( !info->bIsToplevel )
+		return;
+
+	wl_list_remove( &info->request_fullscreen.link );
+	wl_list_remove( &info->request_maximize.link );
+	wl_list_remove( &info->toplevel_destroy.link );
+	info->bIsToplevel = false;
+}
+
 static void wlserver_xdg_surface_info_finish( struct wlserver_xdg_surface_info *info )
 {
+	wlserver_xdg_toplevel_info_finish( info );
+
 	{
 		std::unique_lock lock( g_wlserver_xdg_shell_windows_lock );
 		std::erase_if( wlserver.xdg_wins,
@@ -618,11 +631,6 @@ static void wlserver_xdg_surface_info_finish( struct wlserver_xdg_surface_info *
 	wl_list_remove( &info->map.link );
 	wl_list_remove( &info->unmap.link );
 	wl_list_remove( &info->destroy.link );
-	if (info->bIsToplevel)
-	{
-		wl_list_remove(&info->request_fullscreen.link);
-		wl_list_remove(&info->request_maximize.link);
-	}
 }
 
 static void handle_wl_surface_destroy( struct wl_listener *l, void *data )
@@ -1942,6 +1950,15 @@ static void waylandy_surface_destroy(struct wl_listener *listener, void *data) {
 		wlserver_surface->xdg_surface = nullptr;
 }
 
+static void xdg_toplevel_destroy(struct wl_listener *listener, void *data)
+{
+	struct wlserver_xdg_surface_info *info =
+		wl_container_of(listener, info, toplevel_destroy);
+
+	wlserver_xdg_toplevel_info_finish( info );
+	wlserver.xdg_dirty = true;
+}
+
 static void xdg_toplevel_request_fullscreen(struct wl_listener *listener, void *data)
 {
 	struct wlserver_xdg_surface_info *info =
@@ -1973,6 +1990,8 @@ void xdg_toplevel_new(struct wl_listener *listener, void *data)
 	wlserver_xdg_surface_info *info = wlserver_surface->xdg_surface;
 	info->bIsToplevel = true;
 
+	info->toplevel_destroy.notify = xdg_toplevel_destroy;
+	wl_signal_add(&toplevel->events.destroy, &info->toplevel_destroy);
 	info->request_fullscreen.notify = xdg_toplevel_request_fullscreen;
 	wl_signal_add(&toplevel->events.request_fullscreen, &info->request_fullscreen);
 	info->request_maximize.notify = xdg_toplevel_request_maximize;
